@@ -360,15 +360,11 @@
 					showSidebar.set(false);
 				}
 
-				if ($showSidebar && !value) {
+				if (!$showSidebar && !value) {
 					const navElement = document.getElementsByTagName('nav')[0];
 					if (navElement) {
 						navElement.style['-webkit-app-region'] = 'drag';
 					}
-				}
-
-				if (!$showSidebar && !value) {
-					showSidebar.set(true);
 				}
 			}),
 			showSidebar.subscribe(async (value) => {
@@ -574,13 +570,13 @@
 					<Tooltip content={$i18n.t('New Chat')} placement="right">
 						<a
 							class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
-							href="/"
+							href="/?new=true"
 							draggable="false"
 							on:click={async (e) => {
 								e.stopImmediatePropagation();
 								e.preventDefault();
 
-								goto('/');
+								goto('/?new=true');
 								newChatHandler();
 							}}
 							aria-label={$i18n.t('New Chat')}
@@ -730,7 +726,7 @@
 			>
 				<a
 					class="flex items-center rounded-xl size-8.5 h-full justify-center hover:bg-gray-100/50 dark:hover:bg-gray-850/50 transition no-drag-region"
-					href="/"
+					href="/?new=true"
 					draggable="false"
 					on:click={newChatHandler}
 				>
@@ -742,7 +738,7 @@
 					/>
 				</a>
 
-				<a href="/" class="flex flex-1 px-1.5" on:click={newChatHandler}>
+				<a href="/welcome" class="flex flex-1 px-1.5">
 					<div class=" self-center font-medium text-gray-850 dark:text-white font-primary">
 						{$WEBUI_NAME}
 					</div>
@@ -788,7 +784,7 @@
 						<a
 							id="sidebar-new-chat-button"
 							class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition outline-none"
-							href="/"
+							href="/?new=true"
 							draggable="false"
 							on:click={newChatHandler}
 							aria-label={$i18n.t('New Chat')}
