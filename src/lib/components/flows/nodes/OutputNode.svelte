@@ -29,6 +29,7 @@
 	let expanded = false;
 	let showLightbox = false;
 	let currentIterationIndex = 0;
+	let videoError = false;
 	
 	// Handle iteration results array
 	$: iterationResults = data.iterationResults || [];
@@ -80,6 +81,10 @@
 		a.click();
 		document.body.removeChild(a);
 		URL.revokeObjectURL(url);
+	}
+	
+	function handleVideoError() {
+		videoError = true;
 	}
 </script>
 
@@ -190,20 +195,27 @@
 						<img src={fileUrl} alt="Output" class="w-full rounded" />
 					</button>
 				{:else if data.fileType === 'video'}
-					<div class="relative group">
-						<video src={fileUrl} class="w-full rounded" preload="metadata">
-							<track kind="captions" />
-						</video>
-						<button
-							type="button"
-							on:click={openLightbox}
-							class="nodrag absolute inset-0 flex items-center justify-center bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all rounded cursor-pointer"
-						>
-							<svg class="w-12 h-12 text-white opacity-60 group-hover:opacity-90 transition-opacity" fill="currentColor" viewBox="0 0 24 24">
-								<path d="M8 5v14l11-7z"/>
-							</svg>
-						</button>
+				{#if videoError}
+					<div class="w-full p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded flex flex-col items-center justify-center gap-2">
+						<svg class="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+						</svg>
+						<span class="text-xs text-red-600 dark:text-red-400">Failed to load video</span>
 					</div>
+				{:else}
+					<div class="relative">
+						<video 
+							src={fileUrl ? `${fileUrl}#t=0.1` : ''} 
+							controls
+							class="w-full rounded" 
+							preload="metadata"
+							on:error={handleVideoError}
+						>
+							<track kind="captions" />
+							Your browser does not support the video tag.
+						</video>
+					</div>
+				{/if}
 				{:else if data.fileType === 'audio'}
 					<audio src={fileUrl} controls class="w-full" />
 				{/if}
