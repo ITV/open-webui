@@ -84,10 +84,16 @@
 					>
 						{#if $user?.role === 'admin' || $user?.permissions?.workspace?.models}
 							<a
-								class="min-w-fit p-1.5 {$page.url.pathname.includes('/workspace/models')
+								class="min-w-fit p-1.5 {$page.url.pathname === '/workspace/models' || $page.url.pathname.startsWith('/workspace/models/')
 									? ''
 									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
 								href="/workspace/models">{$i18n.t('Models')}</a
+							>
+							<a
+								class="min-w-fit p-1.5 {$page.url.pathname === '/workspace/agents'
+									? ''
+									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								href="/workspace/agents">{$i18n.t('Agents')}</a
 							>
 						{/if}
 
@@ -121,6 +127,16 @@
 								{$i18n.t('Tools')}
 							</a>
 						{/if}
+
+						<!-- Media tab -->
+						<a
+							class="min-w-fit p-1.5 {$page.url.pathname.includes('/media')
+								? ''
+								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+							href="/workspace/media"
+						>
+							{$i18n.t('Media')}
+						</a>
 					</div>
 				</div>
 
