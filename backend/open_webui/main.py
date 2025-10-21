@@ -79,6 +79,7 @@ from open_webui.routers import (
     channels,
     chats,
     notes,
+    flows,
     folders,
     configs,
     groups,
@@ -243,6 +244,10 @@ from open_webui.config import (
     DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
     DATALAB_MARKER_FORMAT_LINES,
     DATALAB_MARKER_OUTPUT_FORMAT,
+    MINERU_API_MODE,
+    MINERU_API_URL,
+    MINERU_API_KEY,
+    MINERU_PARAMS,
     DATALAB_MARKER_USE_LLM,
     EXTERNAL_DOCUMENT_LOADER_URL,
     EXTERNAL_DOCUMENT_LOADER_API_KEY,
@@ -612,6 +617,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS configuration: allow Svelte dev server with credentials
+# Note: wildcard origins are not allowed when allow_credentials=True.
+dev_allowed_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=dev_allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # For Open WebUI OIDC/OAuth2
 oauth_manager = OAuthManager(app)
 app.state.oauth_manager = oauth_manager
@@ -853,6 +873,10 @@ app.state.config.DOCLING_PICTURE_DESCRIPTION_API = DOCLING_PICTURE_DESCRIPTION_A
 app.state.config.DOCUMENT_INTELLIGENCE_ENDPOINT = DOCUMENT_INTELLIGENCE_ENDPOINT
 app.state.config.DOCUMENT_INTELLIGENCE_KEY = DOCUMENT_INTELLIGENCE_KEY
 app.state.config.MISTRAL_OCR_API_KEY = MISTRAL_OCR_API_KEY
+app.state.config.MINERU_API_MODE = MINERU_API_MODE
+app.state.config.MINERU_API_URL = MINERU_API_URL
+app.state.config.MINERU_API_KEY = MINERU_API_KEY
+app.state.config.MINERU_PARAMS = MINERU_PARAMS
 
 app.state.config.TEXT_SPLITTER = RAG_TEXT_SPLITTER
 app.state.config.TIKTOKEN_ENCODING_NAME = TIKTOKEN_ENCODING_NAME
@@ -1292,6 +1316,7 @@ app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
 app.include_router(channels.router, prefix="/api/v1/channels", tags=["channels"])
 app.include_router(chats.router, prefix="/api/v1/chats", tags=["chats"])
 app.include_router(notes.router, prefix="/api/v1/notes", tags=["notes"])
+app.include_router(flows.router, prefix="/api/v1/flows", tags=["flows"])
 
 
 app.include_router(models.router, prefix="/api/v1/models", tags=["models"])

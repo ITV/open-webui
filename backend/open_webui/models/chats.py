@@ -502,6 +502,7 @@ class ChatTable:
         user_id: str,
         include_archived: bool = False,
         include_folders: bool = False,
+        include_pinned: bool = False,
         skip: Optional[int] = None,
         limit: Optional[int] = None,
     ) -> list[ChatTitleIdResponse]:
@@ -511,7 +512,8 @@ class ChatTable:
             if not include_folders:
                 query = query.filter_by(folder_id=None)
 
-            query = query.filter(or_(Chat.pinned == False, Chat.pinned == None))
+            if not include_pinned:
+                query = query.filter(or_(Chat.pinned == False, Chat.pinned == None))
 
             if not include_archived:
                 query = query.filter_by(archived=False)
@@ -552,6 +554,24 @@ class ChatTable:
                 .all()
             )
             return [ChatModel.model_validate(chat) for chat in all_chats]
+
+    def get_chat_metadata_by_ids(self, chat_ids: list[str]) -> list[dict]:
+        """
+        Get minimal chat metadata (id, title, folder_id) without loading full chat history.
+        Optimized for media page and other cases where only metadata is needed.
+        """
+        with get_db() as db:
+            # Only select needed columns, avoiding expensive chat JSON column
+            results = (
+                db.query(Chat.id, Chat.title, Chat.folder_id)
+                .filter(Chat.id.in_(chat_ids))
+                .filter_by(archived=False)
+                .all()
+            )
+            return [
+                {"id": r.id, "title": r.title, "folder_id": r.folder_id}
+                for r in results
+            ]
 
     def get_chat_by_id(self, id: str) -> Optional[ChatModel]:
         try:
@@ -1061,6 +1081,48 @@ class ChatTable:
                 return True
         except Exception:
             return False
+
+    def get_chat_ids_containing_file_ids(
+        self, user_id: str, file_ids: set[str], limit: int = 1000
+    ) -> dict[str, str]:
+        """
+        Efficiently search for file IDs in chat content and return a mapping of file_id -> chat_id.
+        Only processes the most recent chats (limited by limit parameter).
+        
+        Returns:
+            dict mapping file_id to chat_id for files found in chats
+        """
+        if not file_ids:
+            return {}
+        
+        file_to_chat = {}
+        remaining_files = file_ids.copy()
+        
+        with get_db() as db:
+            # Get only id and chat columns, ordered by most recent first
+            # This reduces memory usage significantly compared to loading full ChatModel objects
+            chats = (
+                db.query(Chat.id, Chat.chat)
+                .filter_by(user_id=user_id)
+                .order_by(Chat.updated_at.desc())
+                .limit(limit)
+                .all()
+            )
+            
+            for chat_id, chat_content in chats:
+                if not chat_content or not remaining_files:
+                    break
+                
+                # Convert chat to string once
+                chat_str = json.dumps(chat_content)
+                
+                # Check all remaining files against this chat
+                for file_id in list(remaining_files):
+                    if file_id in chat_str:
+                        file_to_chat[file_id] = chat_id
+                        remaining_files.remove(file_id)
+        
+        return file_to_chat
 
 
 Chats = ChatTable()

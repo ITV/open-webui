@@ -42,7 +42,16 @@
 />
 
 <div class="flex w-full gap-2 items-center">
-	<Tooltip className="w-full relative" content={''} placement="top-start">
+	<Tooltip
+		className="w-full relative"
+		content={$i18n.t(`WebUI will make requests to "{{url}}"`, {
+			url:
+				(connection?.type ?? 'openapi') === 'mcp'
+					? `${connection?.url}`
+					: `${connection?.url}${(connection?.path?.startsWith('/') ? '' : '/')}${connection?.path ?? 'openapi.json'}`
+		})}
+		placement="top-start"
+	>
 		<div class="flex w-full">
 			<div
 				class="flex-1 relative flex gap-1.5 items-center {!(connection?.config?.enable ?? true)
@@ -52,10 +61,17 @@
 				<Tooltip content={connection?.type === 'mcp' ? $i18n.t('MCP') : $i18n.t('OpenAPI')}>
 					<WrenchAlt />
 				</Tooltip>
-				<div class=" capitalize outline-hidden w-full bg-transparent">
-					{connection?.info?.name ?? connection?.url}
-					<span class="text-gray-500">{connection?.info?.id}</span>
-				</div>
+
+				{#if connection?.info?.name}
+					<div class=" capitalize outline-hidden w-full bg-transparent">
+						{connection?.info?.name ?? connection?.url}
+						<span class="text-gray-500">{connection?.info?.id ?? ''}</span>
+					</div>
+				{:else}
+					<div>
+						{connection?.url}
+					</div>
+				{/if}
 			</div>
 		</div>
 	</Tooltip>

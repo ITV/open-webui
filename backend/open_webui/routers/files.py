@@ -34,6 +34,8 @@ from open_webui.models.files import (
     Files,
 )
 from open_webui.models.knowledge import Knowledges
+from open_webui.models.chats import Chats
+from open_webui.models.folders import Folders
 
 from open_webui.routers.knowledge import get_knowledge, get_knowledge_list
 from open_webui.routers.retrieval import ProcessFileForm, process_file
@@ -87,6 +89,7 @@ def has_access_to_file(
 
 def process_uploaded_file(request, file, file_path, file_item, file_metadata, user):
     try:
+        processed = False
         if file.content_type:
             stt_supported_content_types = getattr(
                 request.app.state.config, "STT_SUPPORTED_CONTENT_TYPES", []
@@ -111,15 +114,27 @@ def process_uploaded_file(request, file, file_path, file_item, file_metadata, us
                     ),
                     user=user,
                 )
+                processed = True
             elif (not file.content_type.startswith(("image/", "video/"))) or (
                 request.app.state.config.CONTENT_EXTRACTION_ENGINE == "external"
             ):
                 process_file(request, ProcessFileForm(file_id=file_item.id), user=user)
+                processed = True
         else:
             log.info(
                 f"File type {file.content_type} is not provided, but trying to process anyway"
             )
             process_file(request, ProcessFileForm(file_id=file_item.id), user=user)
+            processed = True
+
+        # If no processing was performed (e.g., certain image/video types), mark as completed
+        if not processed:
+            Files.update_file_data_by_id(
+                file_item.id,
+                {
+                    "status": "completed",
+                },
+            )
     except Exception as e:
         log.error(f"Error processing file: {file_item.id}")
         Files.update_file_data_by_id(
@@ -266,6 +281,163 @@ def upload_file_handler(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.DEFAULT("Error uploading file"),
         )
+
+
+############################
+# Get Media Overview
+############################
+
+
+class MediaOverviewResponse(BaseModel):
+    files: list[dict]
+    chats: list[dict]
+    folders: list[dict]
+    total: int
+    skip: int
+    limit: int
+
+
+@router.get("/media-overview")
+async def get_media_overview(
+    user=Depends(get_verified_user),
+    skip: int = Query(0, ge=0, description="Number of files to skip"),
+    limit: int = Query(0, ge=0, le=500, description="Max files to return (0 = all)"),
+):
+    """
+    Get media files with pre-joined chat and folder information.
+    Only returns folders/chats that contain media files.
+    Optimized for the media workspace page.
+    """
+    import time
+    start_time = time.time()
+    
+    # Get all user's files
+    t1 = time.time()
+    files = Files.get_files_by_user_id(user.id)
+    log.info(f"[PERF] Get all files: {(time.time() - t1)*1000:.0f}ms ({len(files)} files)")
+    
+    # Filter to media types only (images, videos, audio)
+    t2 = time.time()
+    media_types = ('image/', 'video/', 'audio/')
+    media_files = []
+    file_to_chat_map = {}
+    files_without_chat = set()  # Track files needing chat resolution
+    
+    for f in files:
+        # Check if it's a media file based on content_type in meta
+        content_type = f.meta.get('content_type', '') if f.meta else ''
+        if content_type and content_type.startswith(media_types):
+            media_files.append(f)
+            # Try to get chat_id from metadata first
+            chat_id = None
+            if f.meta:
+                chat_id = f.meta.get('chat_id') or f.meta.get('source_chat_id')
+            
+            # Handle orphan files (marked as 'orphan' to skip expensive lookup)
+            if chat_id == 'orphan':
+                file_to_chat_map[f.id] = None
+            else:
+                file_to_chat_map[f.id] = chat_id
+                # Only add to files_without_chat if not marked as orphan
+                if chat_id is None:
+                    files_without_chat.add(f.id)
+    
+    log.info(f"[PERF] Filter media files: {(time.time() - t2)*1000:.0f}ms ({len(media_files)} media, {len(files_without_chat)} need chat lookup)")
+    
+    # For files without chat_id in metadata, search chat history
+    # OPTIMIZATION: Use optimized method that only loads minimal chat data
+    if files_without_chat:
+        t3 = time.time()
+        # Get chat associations for files without metadata
+        resolved_mappings = Chats.get_chat_ids_containing_file_ids(user.id, files_without_chat)
+        log.info(f"[PERF] Chat lookup for orphans: {(time.time() - t3)*1000:.0f}ms ({len(resolved_mappings or [])} resolved)")
+        
+        # Build file dict for efficient lookup
+        file_dict = {f.id: f for f in media_files if f.id in files_without_chat}
+        
+        # Update file_to_chat_map and file metadata for resolved files
+        if resolved_mappings:
+            for file_id, chat_id in resolved_mappings.items():
+                file_to_chat_map[file_id] = chat_id
+                
+                # Update file metadata so it's available on subsequent loads
+                f = file_dict.get(file_id)
+                if f:
+                    if not f.meta:
+                        f.meta = {}
+                    f.meta['chat_id'] = chat_id
+                    
+                    # Persist to database so we don't need to search again
+                    try:
+                        Files.update_file_metadata_by_id(file_id, f.meta)
+                    except Exception as e:
+                        log.warning(f"Failed to persist chat_id for file {file_id}: {e}")
+        
+        # Mark unresolved files as orphans so we don't search again
+        orphan_files = files_without_chat - set(resolved_mappings.keys() if resolved_mappings else [])
+        if orphan_files:
+            log.info(f"[PERF] Marking {len(orphan_files)} files as orphans (no chat found)")
+            for file_id in orphan_files:
+                f = file_dict.get(file_id)
+                if f:
+                    if not f.meta:
+                        f.meta = {}
+                    # Mark as orphan with special value so we don't search again
+                    f.meta['chat_id'] = 'orphan'
+                    try:
+                        Files.update_file_metadata_by_id(file_id, f.meta)
+                    except Exception as e:
+                        log.warning(f"Failed to mark file {file_id} as orphan: {e}")
+    
+    # Collect unique chat IDs (exclude None and 'orphan' marker)
+    t4 = time.time()
+    chat_ids = set(cid for cid in file_to_chat_map.values() if cid is not None and cid != 'orphan')
+    
+    # Get only chat metadata (id, title, folder_id) - optimized to avoid loading full chat history
+    chats_dict = []
+    folder_ids = set()
+    if chat_ids:
+        chats_dict = Chats.get_chat_metadata_by_ids(list(chat_ids))
+        # Extract folder IDs from chats
+        for chat in chats_dict:
+            if chat.get("folder_id"):
+                folder_ids.add(chat["folder_id"])
+    log.info(f"[PERF] Get chats: {(time.time() - t4)*1000:.0f}ms ({len(chats_dict)} chats)")
+    
+    # Get only folders that contain chats with media
+    t5 = time.time()
+    folders = []
+    if folder_ids:
+        folders = Folders.get_folders_by_ids(list(folder_ids))
+    log.info(f"[PERF] Get folders: {(time.time() - t5)*1000:.0f}ms ({len(folders)} folders)")
+    
+    # Sort files by updated_at (newest first) before pagination
+    t6 = time.time()
+    media_files.sort(key=lambda f: f.updated_at if hasattr(f, 'updated_at') and f.updated_at else 0, reverse=True)
+    log.info(f"[PERF] Sort files: {(time.time() - t6)*1000:.0f}ms")
+    
+    # Apply pagination if requested
+    total_files = len(media_files)
+    if limit > 0:
+        media_files = media_files[skip : skip + limit]
+    
+    # Convert files and folders to dicts for response (chats already dicts from get_chat_metadata_by_ids)
+    t7 = time.time()
+    files_dict = [f.model_dump() for f in media_files]
+    folders_dict = [folder.model_dump() for folder in folders]
+    log.info(f"[PERF] Serialize to dicts: {(time.time() - t7)*1000:.0f}ms")
+    
+    total_time = (time.time() - start_time) * 1000
+    log.info(f"[PERF] media-overview TOTAL: {total_time:.0f}ms (skip={skip}, limit={limit}, returned {len(files_dict)} files)")
+    
+    return {
+        "files": files_dict,
+        "chats": chats_dict,
+        "folders": folders_dict,
+        "total": total_files,
+        "skip": skip,
+        "limit": limit if limit > 0 else total_files,
+    }
 
 
 ############################
